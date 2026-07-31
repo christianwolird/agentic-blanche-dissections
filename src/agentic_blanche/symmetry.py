@@ -17,8 +17,25 @@ def _nauty_graph(graph: PlaneGraph) -> pynauty.Graph:
     )
 
 
+def _rooted_nauty_graph(graph: PlaneGraph, root: Edge) -> pynauty.Graph:
+    source, sink = root
+    if canonical_edge(root) not in graph.edges:
+        raise ValueError("root edge is not in the graph")
+    remaining = set(range(graph.vertex_count)) - {source, sink}
+    return pynauty.Graph(
+        graph.vertex_count,
+        adjacency_dict=graph.as_adjacency(),
+        vertex_coloring=[{source}, {sink}, remaining],
+    )
+
+
 def canonical_certificate(graph: PlaneGraph) -> bytes:
     return bytes(pynauty.certificate(_nauty_graph(graph)))
+
+
+def rooted_certificate(graph: PlaneGraph, root: Edge) -> bytes:
+    """Return a label-independent certificate for an oriented rooted graph."""
+    return bytes(pynauty.certificate(_rooted_nauty_graph(graph, root)))
 
 
 def graph_id(graph: PlaneGraph) -> str:
@@ -55,6 +72,4 @@ def edge_orbit_representatives(graph: PlaneGraph) -> tuple[Edge, ...]:
 
 
 def rooted_graph_id(graph: PlaneGraph, root: Edge) -> str:
-    base = graph_id(graph)
-    edge = canonical_edge(root)
-    return f"{base}:{edge[0]}-{edge[1]}:{root[0]}>{root[1]}"
+    return hashlib.sha256(rooted_certificate(graph, root)).hexdigest()[:24]

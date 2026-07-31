@@ -8,11 +8,12 @@ in [`blanche-dissections`](https://github.com/christianwolird/blanche-dissection
 
 1. stream unrooted polyhedral graphs from plantri;
 2. quotient by planar duality and root only at edge-orbit representatives;
-3. construct both the sparse edge-current presentation and an adaptive
-   fundamental-cycle presentation;
-4. use a finite-field msolve pilot to choose the faster presentation;
-5. probe several primes before attempting a characteristic-zero RUR;
-6. recover rational currents exactly and filter rectangle congruences.
+3. solve the sparse current-potential bilinear presentation by default;
+4. recover finite-field points and apply the Mondrian noncongruence test
+   before escalating to another prime;
+5. coordinate process workers through a resumable SQLite/WAL task database;
+6. solve survivors over the rationals and verify the original KCL and KVL
+   equations independently of the solver presentation.
 
 The safe default treats the modular stage as evidence, not as a proof. It
 continues to characteristic zero unless heuristic pruning is explicitly
@@ -29,7 +30,7 @@ The source current is normalized to \(n\). Hence the geometry is an
 lengths scale to integer side lengths, and an affine stretch gives the
 equivalent square-dissection formulation.
 
-The saturated Kirchhoff algebra imposes:
+The Kirchhoff algebra imposes:
 
 - KCL at vertices;
 - KVL around non-root faces;
@@ -49,6 +50,21 @@ these congruence tests to its rational points. It does not build the much
 larger dummy-variable Mondrian ideal.
 
 ## Presentations
+
+### Current-potential bilinear presentation
+
+This is the default. Fix source potential one and sink potential zero. For
+each non-root edge \(e=(u,v)\), introduce its current \(x_e\) and impose
+
+\[
+x_e(h_u-h_v)=1.
+\]
+
+Together with KCL at the \(V-2\) internal vertices this gives a square system
+of \(n+V-2\) equations. Every equation is linear or bilinear, every
+unit-area equation has three terms, and nonzero currents are automatic. The
+larger variable count is decisively outweighed by the absence of cleared
+products in the tested range.
 
 ### Edge-current presentation
 
@@ -106,7 +122,7 @@ agentic-blanche search \
   --edges 18 \
   --sieve-mode report \
   --prime-count 9 \
-  --exact-threads 8
+  --workers 4
 ```
 
 Use the experimentally effective, but not presently proof-producing,
@@ -114,32 +130,52 @@ modular pruning mode:
 
 ```bash
 agentic-blanche search \
-  --edges 18 \
+  --edges 21 \
   --sieve-mode heuristic-prune \
-  --prime-count 9
+  --prime-count 9 \
+  --modular-timeout 1 \
+  --workers 8
 ```
 
-Results are appended to `results/E18.jsonl`. Repeating the command resumes
-from the existing task identifiers.
+Tasks and results are stored in `results/E21.sqlite`. The database uses WAL
+mode and leased claims, so repeating the command resumes safely after an
+interruption. A neighboring manifest records the commit, command, search
+configuration, platform, and solver versions.
 
 Useful options:
 
 ```text
---presentation auto|edge|cycle
+--presentation bilinear|auto|edge|cycle
 --no-pilot
 --include-duals
 --plantri /path/to/plantri
 --msolve /path/to/msolve
---timeout SECONDS
+--workers PROCESSES
+--modular-timeout SECONDS
+--exact-timeout SECONDS
+--requeue completed|shelved|timed-out|failed
 --limit TASKS
+```
+
+For example, revisit the shelved queue without modular pruning:
+
+```bash
+agentic-blanche search \
+  --edges 21 \
+  --sieve-mode off \
+  --requeue shelved \
+  --exact-timeout 600 \
+  --workers 4
 ```
 
 ## Exactness boundary
 
-Suppose a finite-field RUR is squarefree, has the expected degree, and its
-univariate polynomial has no linear factor. This is strong evidence against
-a rational point, but it is not automatically a proof: a rational point may
-have bad reduction or escape to infinity.
+For each finite-field RUR, the implementation computes
+\(\gcd(f(t),t^p-t)\), recovers the associated coordinates, verifies the
+defining equations, recovers the original currents, and applies the
+noncongruence tests in \(\mathbf F_p\). Finding no modular Mondrian point is
+strong evidence against a rational point, but is not automatically a proof:
+a rational point may have bad reduction or escape to infinity.
 
 The library represents this distinction explicitly:
 
@@ -154,28 +190,26 @@ theoretical extension point is therefore a theorem-backed implementation of
 
 ## Measured performance
 
-On a stratified sample of 40 rooted systems with 9, 12, or 15 edges:
+The preflight benchmark uses 50 deterministic roots, stratified by vertex
+count at 12, 15, 18, and 21 graph edges. Each modular solve gets one second.
+Times below are aggregate wall times; success counts are in parentheses.
 
-- the adaptive cycle presentation won 29 cases;
-- median exact speedup was 1.18×;
-- aggregate exact speedup was 1.65×;
-- at 15 edges, aggregate exact speedup was 1.69×.
+| Edges | Edge current | Adaptive cycle | Bilinear |
+|---:|---:|---:|---:|
+| 12 | 0.134 s (10/10) | 0.097 s (10/10) | 0.103 s (10/10) |
+| 15 | 0.347 s (10/10) | 0.247 s (10/10) | 0.211 s (10/10) |
+| 18 | 6.711 s (15/15) | 3.859 s (15/15) | 1.717 s (15/15) |
+| 21 | 15.067 s (0/15) | 13.545 s (5/15) | 6.837 s (15/15) |
 
-For five representative 18-edge systems, the adaptive exact times were:
+On one representative 18-edge exact solve, bilinear took 0.061 s, versus
+5.224 s for adaptive cycle and 18.353 s for edge current. The staged
+nine-prime heuristic shelved all 50 sampled roots in 111 probes without a
+modular timeout. On the 15 sampled 21-edge tasks, the SQLite runner took
+12.615 s with one process and 4.022 s with four, a 3.14× speedup.
 
-| \(V,F\) | Edge current | Adaptive cycle | Speedup |
-|---|---:|---:|---:|
-| \(8,12\) | 17.30 s | 3.58 s | 4.84× |
-| \(9,11\) | 25.65 s | 9.27 s | 2.77× |
-| \(10,10\) | 21.85 s | 19.51 s | 1.12× |
-| \(11,9\) | 21.46 s | 19.50 s | 1.10× |
-| \(12,8\) | 2.10 s | 0.89 s | 2.35× |
-
-In the 40-system modular experiment, nine primes separated all 37 systems
-without rational points from the three systems with rational points. Those
-three rational points all failed the noncongruence test. Modular probing plus
-exact solution of survivors was 5.27× faster than exact edge-current solving
-of every system. This is benchmark evidence, not a good-reduction theorem.
+These are search-engineering measurements, not a good-reduction theorem.
+See [`docs/benchmark-report.md`](docs/benchmark-report.md) for the method,
+raw-data location, and limitations.
 
 ## Development
 
@@ -187,4 +221,3 @@ pytest
 
 See [`docs/model.md`](docs/model.md) for the algebra and
 [`docs/architecture.md`](docs/architecture.md) for the software boundaries.
-

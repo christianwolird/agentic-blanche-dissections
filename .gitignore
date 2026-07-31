@@ -4,8 +4,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+.tools/
 build/
 dist/
 results/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.jsonl
-

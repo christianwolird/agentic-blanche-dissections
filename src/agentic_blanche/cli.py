@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import sys
 from pathlib import Path
 
-from agentic_blanche.msolve import MSolve
+from agentic_blanche.manifest import create_manifest
+from agentic_blanche.parallel import run_parallel
 from agentic_blanche.plantri import Plantri
+from agentic_blanche.storage import SQLiteTaskStore, TaskStatus
 from agentic_blanche.workflow import (
-    JSONLCheckpoint,
     PresentationChoice,
     SearchConfig,
-    SearchWorkflow,
     SieveMode,
     descending_primes,
 )
@@ -32,8 +33,9 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument(
         "--output",
         type=Path,
-        help="JSONL checkpoint path (default: results/E<edges>.jsonl)",
+        help="SQLite task database (default: results/E<edges>.sqlite)",
     )
+    search.add_argument("--manifest", type=Path)
     search.add_argument("--plantri", default="plantri")
     search.add_argument("--msolve", default="msolve")
     search.add_argument("--include-duals", action="store_true")
@@ -47,11 +49,26 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument(
         "--presentation",
         choices=[choice.value for choice in PresentationChoice],
-        default=PresentationChoice.AUTO.value,
+        default=PresentationChoice.BILINEAR.value,
     )
     search.add_argument("--no-pilot", action="store_true")
-    search.add_argument("--exact-threads", type=int, default=8)
-    search.add_argument("--timeout", type=float)
+    search.add_argument("--workers", type=int, default=1)
+    search.add_argument("--exact-threads", type=int, default=1)
+    search.add_argument("--modular-timeout", type=float, default=1.0)
+    search.add_argument("--exact-timeout", type=float)
+    search.add_argument("--lease-seconds", type=float, default=3600)
+    search.add_argument(
+        "--requeue",
+        action="append",
+        choices=[
+            TaskStatus.COMPLETED.value,
+            TaskStatus.SHELVED.value,
+            TaskStatus.TIMED_OUT.value,
+            TaskStatus.FAILED.value,
+        ],
+        default=[],
+        help="terminal task state to return to pending; may be repeated",
+    )
 
     enumerate_parser = subparsers.add_parser(
         "enumerate", help="count streamed graph/root tasks"
@@ -64,48 +81,79 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _search(args: argparse.Namespace) -> int:
-    output = args.output or Path(f"results/E{args.edges}.jsonl")
+    output = args.output or Path(f"results/E{args.edges}.sqlite")
+    manifest_path = args.manifest or output.with_suffix(".manifest.json")
     plantri = Plantri(args.plantri)
-    solver = MSolve(
-        executable=args.msolve,
-        threads=args.exact_threads,
-        timeout=args.timeout,
-    )
     config = SearchConfig(
         primes=descending_primes(args.prime_count, args.prime_start),
         sieve_mode=SieveMode(args.sieve_mode),
         presentation=PresentationChoice(args.presentation),
         pilot_presentations=not args.no_pilot,
         exact_threads=args.exact_threads,
+        modular_timeout=args.modular_timeout,
+        exact_timeout=args.exact_timeout,
     )
-    workflow = SearchWorkflow(solver, config)
-    checkpoint = JSONLCheckpoint(output)
     rooted_graphs = plantri.rooted_graphs(
         args.edges,
         quotient_duality=not args.include_duals,
     )
+    if args.limit is not None:
+        rooted_graphs = itertools.islice(rooted_graphs, args.limit)
 
-    processed = pruned = rational = candidates = 0
-    for result in workflow.run(
-        rooted_graphs,
-        checkpoint=checkpoint,
-        limit=args.limit,
-    ):
-        processed += 1
-        pruned += int(result.pruned)
-        rational += len(result.rational_solutions)
-        candidates += len(result.mondrian_candidates)
-        print(json.dumps(result.to_dict(), sort_keys=True), flush=True)
+    store = SQLiteTaskStore(output)
+    queued = store.enqueue_many(rooted_graphs)
+    requeued = store.requeue(TaskStatus(status) for status in args.requeue)
+    manifest = create_manifest(
+        argv=sys.argv,
+        config={
+            "edges": args.edges,
+            "primes": list(config.primes),
+            "sieve_mode": config.sieve_mode.value,
+            "presentation": config.presentation.value,
+            "pilot_presentations": config.pilot_presentations,
+            "workers": args.workers,
+            "exact_threads": config.exact_threads,
+            "modular_timeout": config.modular_timeout,
+            "exact_timeout": config.exact_timeout,
+            "quotient_duality": not args.include_duals,
+            "requeued_statuses": args.requeue,
+        },
+        repository=Path(__file__).resolve().parents[2],
+        plantri=args.plantri,
+        msolve=args.msolve,
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    store.record_manifest(str(manifest["run_id"]), manifest)
+    workers = run_parallel(
+        store,
+        msolve=args.msolve,
+        config=config,
+        workers=args.workers,
+        lease_seconds=args.lease_seconds,
+    )
     print(
         json.dumps(
             {
-                "processed": processed,
-                "pruned": pruned,
-                "rational_points": rational,
-                "mondrian_candidates": candidates,
-                "checkpoint": str(output),
+                "queued": queued,
+                "requeued": requeued,
+                "workers": [
+                    {
+                        "worker_id": worker.worker_id,
+                        "completed": worker.completed,
+                        "failed": worker.failed,
+                    }
+                    for worker in workers
+                ],
+                "counts": store.counts(),
+                "database": str(output),
+                "manifest": str(manifest_path),
             }
-        )
+        ),
+        flush=True,
     )
     return 0
 

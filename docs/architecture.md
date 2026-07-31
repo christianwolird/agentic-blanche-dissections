@@ -5,13 +5,16 @@ The package is intentionally divided at mathematical boundaries.
 | Module | Responsibility |
 |---|---|
 | `graph.py` | Rotation systems, faces, rooted planar duality, edge correspondence |
-| `symmetry.py` | Nauty certificates, automorphisms, edge-orbit representatives |
+| `symmetry.py` | Canonical rooted certificates, automorphisms, edge orbits |
 | `plantri.py` | Streaming graph generation and dual quotienting |
 | `polynomial.py` | Sparse integer polynomial arithmetic and msolve serialization |
-| `presentations.py` | Edge-current and primal/dual cycle presentations |
-| `msolve.py` | Subprocess execution and exact/finite RUR parsing |
-| `workflow.py` | Presentation pilot, modular sieve, exact solve, congruence filter |
-| `cli.py` | Resumable JSONL search interface |
+| `presentations.py` | Bilinear, edge-current, and primal/dual cycle presentations |
+| `msolve.py` | Timed subprocesses and exact/finite RUR recovery |
+| `workflow.py` | Modular Mondrian sieve, exact solve, independent verification |
+| `storage.py` | SQLite/WAL task leasing and result persistence |
+| `parallel.py` | Process-level worker scheduling |
+| `manifest.py` | Reproducibility metadata |
+| `cli.py` | Search and enumeration interface |
 
 ## Design decisions
 
@@ -44,19 +47,19 @@ constructed.
 rejection requires a `GoodReductionOracle`; the default oracle certifies
 nothing.
 
-### Checkpoints are append-only
+### Task state is transactional
 
-Every completed rooted task is one JSON object. A restart reads only task
-identifiers and skips completed work. Partial final lines are never written
-because each result is serialized before opening the append.
+SQLite runs in WAL mode. Workers atomically lease pending tasks, and expired
+leases return to the queue after an interrupted process. Rooted graph IDs are
+nauty certificates of vertex-colored graphs, so resume keys are independent
+of plantri's temporary labels. Results and run manifests are committed in the
+same persistent database.
 
 ## Intended extensions
 
 1. A theorem-backed degree and good-prime oracle for the Kirchhoff algebra.
-2. Process-level parallel scheduling: one msolve process per core for small
-   systems, threaded msolve for hard survivors.
+2. Adaptive resource scheduling between single-threaded worker processes and
+   threaded exact solves for hard survivors.
 3. Better spanning-tree optimization using term-count prediction rather than
    cycle support alone.
-4. Canonical rooted certificates independent of plantri vertex labels.
-5. Optional exact verification in a second computer-algebra system.
-
+4. Optional exact verification in a second computer-algebra system.

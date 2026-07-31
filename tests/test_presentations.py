@@ -4,9 +4,12 @@ from agentic_blanche.graph import RootedPlaneGraph
 from agentic_blanche.presentations import (
     PresentationKind,
     build_adaptive_cycle_presentation,
+    build_bilinear_presentation,
     build_cycle_presentation,
     build_edge_current_presentation,
     congruence_violations,
+    verifies_kirchhoff_currents,
+    verifies_kirchhoff_currents_mod,
 )
 
 
@@ -65,6 +68,16 @@ def test_dual_cycle_recovery_is_rational(
     currents = presentation.recover_currents(point)
     assert set(currents) == set(rooted_tetrahedron.nonroot_edges)
     assert all(isinstance(value, Fraction) for value in currents.values())
+    modular_point = {"c0": 25, "c1": 20, "z_nonzero": 65}
+    expected = {
+        (0, 2): 25,
+        (0, 3): 81,
+        (1, 2): 20,
+        (1, 3): 76,
+        (2, 3): 45,
+    }
+    assert presentation.verifies(modular_point, modulus=101)
+    assert presentation.recover_currents_mod(modular_point, 101) == expected
 
 
 def test_congruence_filter():
@@ -76,3 +89,44 @@ def test_congruence_filter():
     violations = congruence_violations(currents, 5)
     assert ((0, 1), (0, 2), "parallel") in violations
     assert ((0, 1), (1, 2), "rotated") in violations
+
+
+def test_bilinear_presentation_is_square_sparse_quadratic(
+    rooted_tetrahedron: RootedPlaneGraph,
+):
+    presentation = build_bilinear_presentation(rooted_tetrahedron)
+    assert presentation.kind == PresentationKind.BILINEAR
+    assert len(presentation.system.variables) == 7
+    assert len(presentation.system.polynomials) == 7
+    assert max(poly.degree for poly in presentation.system.polynomials) == 2
+    assert presentation.system.maximum_term_count <= 3
+
+
+def test_modular_congruence_filter(rooted_tetrahedron: RootedPlaneGraph):
+    currents = {
+        (0, 1): 2,
+        (0, 2): 99,
+        (1, 2): 48,
+    }
+    violations = congruence_violations(currents, 5, modulus=101)
+    assert ((0, 1), (0, 2), "parallel") in violations
+    assert ((0, 1), (1, 2), "rotated") in violations
+    tetrahedron_currents = {
+        (0, 2): 25,
+        (0, 3): 81,
+        (1, 2): 20,
+        (1, 3): 76,
+        (2, 3): 45,
+    }
+    assert verifies_kirchhoff_currents_mod(
+        rooted_tetrahedron,
+        tetrahedron_currents,
+        101,
+    )
+
+
+def test_original_kirchhoff_verifier_rejects_arbitrary_currents(
+    rooted_tetrahedron: RootedPlaneGraph,
+):
+    currents = {edge: Fraction(1) for edge in rooted_tetrahedron.nonroot_edges}
+    assert not verifies_kirchhoff_currents(rooted_tetrahedron, currents)

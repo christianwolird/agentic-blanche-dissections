@@ -24,11 +24,72 @@ def _decode_univariate(encoding: object) -> tuple[int, ...]:
     return coefficients
 
 
+def _decode_parametrization(
+    encoding: object,
+) -> tuple[tuple[int, ...], int]:
+    """Accept both the legacy ``[poly, divisor]`` and v0.10 ``[poly]`` forms."""
+    values = tuple(encoding)  # type: ignore[arg-type]
+    if len(values) == 1:
+        return _decode_univariate(values[0]), 1
+    if len(values) == 2:
+        return _decode_univariate(values[0]), int(values[1])
+    raise ValueError("invalid coordinate parametrization encoding")
+
+
 def _evaluate(coefficients: tuple[int, ...], value: Fraction) -> Fraction:
     result = Fraction(0)
     for coefficient in reversed(coefficients):
         result = result * value + coefficient
     return result
+
+
+def _evaluate_mod(coefficients: tuple[int, ...], value: int, prime: int) -> int:
+    result = 0
+    for coefficient in reversed(coefficients):
+        result = (result * value + coefficient) % prime
+    return result
+
+
+def _poly_pow_mod(
+    base: sympy.Poly,
+    exponent: int,
+    modulus: sympy.Poly,
+) -> sympy.Poly:
+    """Exponentiate in ``F_p[t]/(modulus)`` without constructing ``t**p``."""
+    parameter = modulus.gens[0]
+    result = sympy.Poly(1, parameter, modulus=modulus.get_modulus())
+    base = base.rem(modulus)
+    while exponent:
+        if exponent & 1:
+            result = (result * base).rem(modulus)
+        exponent >>= 1
+        if exponent:
+            base = (base * base).rem(modulus)
+    return result
+
+
+def _finite_linear_roots(polynomial: sympy.Poly, prime: int) -> tuple[int, ...]:
+    """Find all roots in ``F_p`` using ``gcd(f, t**p-t)``.
+
+    This avoids factoring the entire RUR polynomial.  Only the split linear
+    part is factored, which is the information the modular sieve needs.
+    """
+    if polynomial.degree() <= 0:
+        return ()
+    parameter = polynomial.gens[0]
+    coordinate = sympy.Poly(parameter, parameter, modulus=prime)
+    frobenius = _poly_pow_mod(coordinate, prime, polynomial)
+    linear_part = sympy.gcd(polynomial, frobenius - coordinate)
+    if linear_part.degree() <= 0:
+        return ()
+    roots: list[int] = []
+    for factor, multiplicity in sympy.factor_list(linear_part)[1]:
+        if factor.degree() != 1:
+            raise ValueError("Frobenius gcd contained a non-linear factor")
+        leading, constant = (int(value) % prime for value in factor.all_coeffs())
+        root = (-constant * pow(leading, -1, prime)) % prime
+        roots.extend([root] * multiplicity)
+    return tuple(sorted(roots))
 
 
 @dataclass(frozen=True)
@@ -84,14 +145,50 @@ class ExactRUR:
 @dataclass(frozen=True)
 class FiniteRUR:
     prime: int
+    variables: tuple[str, ...]
+    linear_form: tuple[int, ...]
     degree: int
     polynomial: tuple[int, ...]
+    denominator: tuple[int, ...]
+    parametrizations: tuple[tuple[tuple[int, ...], int], ...]
     factor_degrees: tuple[int, ...]
+    unfactored_degree: int
     squarefree: bool
+    linear_roots: tuple[int, ...]
 
     @property
     def linear_factor_count(self) -> int:
-        return self.factor_degrees.count(1)
+        return len(self.linear_roots)
+
+    def finite_points(self) -> tuple[dict[str, int], ...]:
+        points: list[dict[str, int]] = []
+        for root in self.linear_roots:
+            denominator = _evaluate_mod(self.denominator, root, self.prime)
+            if not denominator:
+                continue
+            coordinates = [
+                (
+                    -_evaluate_mod(coefficients, root, self.prime)
+                    * pow(divisor * denominator % self.prime, -1, self.prime)
+                )
+                % self.prime
+                for coefficients, divisor in self.parametrizations
+            ]
+            if len(coordinates) == len(self.variables) - 1:
+                indices = [
+                    index
+                    for index, coefficient in enumerate(self.linear_form)
+                    if coefficient % self.prime
+                ]
+                if len(indices) != 1 or self.linear_form[indices[0]] % self.prime != 1:
+                    raise ValueError(
+                        "non-coordinate finite RUR omitted the primitive coordinate"
+                    )
+                coordinates.insert(indices[0], root)
+            elif len(coordinates) != len(self.variables):
+                raise ValueError("unexpected number of finite RUR parametrizations")
+            points.append(dict(zip(self.variables, coordinates, strict=True)))
+        return tuple(points)
 
 
 @dataclass(frozen=True)
@@ -113,6 +210,14 @@ class FiniteSolve:
     timing: SolveTiming
 
 
+class SolveTimeout(RuntimeError):
+    """Raised when an msolve stage exceeds its per-task wall-clock budget."""
+
+    def __init__(self, seconds: float):
+        super().__init__(f"msolve exceeded the {seconds:g}s timeout")
+        self.seconds = seconds
+
+
 def parse_exact_rur(output: str) -> ExactRUR | None:
     serialized = output.strip().rstrip(":")
     data = ast.literal_eval(serialized)
@@ -132,10 +237,7 @@ def parse_exact_rur(output: str) -> ExactRUR | None:
         linear_form=tuple(Fraction(value) for value in payload[4]),
         polynomial=_decode_univariate(polynomial),
         denominator=_decode_univariate(denominator),
-        parametrizations=tuple(
-            (_decode_univariate(encoding), int(divisor))
-            for encoding, divisor in coordinates
-        ),
+        parametrizations=tuple(_decode_parametrization(item) for item in coordinates),
     )
 
 
@@ -148,7 +250,11 @@ def parse_finite_rur(output: str) -> FiniteRUR | None:
     if len(payload) < 6:
         raise ValueError("output is not a finite-field RUR")
     prime = int(payload[0])
-    degree, coefficients = payload[5][1][0]
+    count, parametrization = payload[5]
+    if count != 1:
+        raise ValueError("expected one finite-field RUR component")
+    polynomial_encoding, denominator_encoding, coordinate_encodings = parametrization
+    degree, coefficients = polynomial_encoding
     coefficients = tuple(int(coefficient) for coefficient in coefficients)
     parameter = sympy.Symbol("t")
     polynomial = sympy.Poly(
@@ -159,21 +265,24 @@ def parse_finite_rur(output: str) -> FiniteRUR | None:
         parameter,
         modulus=prime,
     )
-    factors = sympy.factor_list(polynomial)[1]
-    factor_degrees = tuple(
-        sorted(
-            factor.degree()
-            for factor, multiplicity in factors
-            for _ in range(multiplicity)
-        )
-    )
+    roots = _finite_linear_roots(polynomial, prime)
+    residual_degree = int(degree) - len(roots)
+    factor_degrees = (1,) * len(roots)
     squarefree = sympy.gcd(polynomial, polynomial.diff()).degree() == 0
     return FiniteRUR(
         prime=prime,
+        variables=tuple(payload[3]),
+        linear_form=tuple(int(value) for value in payload[4]),
         degree=int(degree),
         polynomial=coefficients,
+        denominator=_decode_univariate(denominator_encoding),
+        parametrizations=tuple(
+            _decode_parametrization(item) for item in coordinate_encodings
+        ),
         factor_degrees=factor_degrees,
+        unfactored_degree=residual_degree,
         squarefree=bool(squarefree),
+        linear_roots=roots,
     )
 
 
@@ -195,6 +304,7 @@ class MSolve:
         *,
         characteristic: int,
         threads: int | None = None,
+        timeout: float | None = None,
     ) -> tuple[str, SolveTiming]:
         with tempfile.TemporaryDirectory(prefix="agentic-blanche-msolve-") as temp:
             directory = Path(temp)
@@ -215,13 +325,17 @@ class MSolve:
                 str(output_path),
             ]
             started = perf_counter()
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                check=False,
-            )
+            budget = self.timeout if timeout is None else timeout
+            try:
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=budget,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as error:
+                raise SolveTimeout(float(budget)) from error
             elapsed = perf_counter() - started
             if completed.returncode:
                 raise RuntimeError(
@@ -238,14 +352,27 @@ class MSolve:
         system: PolynomialSystem,
         *,
         threads: int | None = None,
+        timeout: float | None = None,
     ) -> ExactSolve:
-        output, timing = self._run(system, characteristic=0, threads=threads)
+        output, timing = self._run(
+            system,
+            characteristic=0,
+            threads=threads,
+            timeout=timeout,
+        )
         return ExactSolve(parse_exact_rur(output), timing)
 
     def finite(
         self,
         system: PolynomialSystem,
         prime: int,
+        *,
+        timeout: float | None = None,
     ) -> FiniteSolve:
-        output, timing = self._run(system, characteristic=prime, threads=1)
+        output, timing = self._run(
+            system,
+            characteristic=prime,
+            threads=1,
+            timeout=timeout,
+        )
         return FiniteSolve(parse_finite_rur(output), timing)

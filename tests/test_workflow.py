@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 from agentic_blanche.graph import RootedPlaneGraph
 from agentic_blanche.msolve import (
-    ExactRUR,
     ExactSolve,
     FiniteRUR,
     FiniteSolve,
@@ -21,31 +20,27 @@ from agentic_blanche.workflow import (
 class FakeSolver:
     exact_calls: int = 0
 
-    def finite(self, system, prime):
+    def finite(self, system, prime, *, timeout=None):
         return FiniteSolve(
             FiniteRUR(
                 prime=prime,
+                variables=system.variables,
+                linear_form=(0,) * len(system.variables),
                 degree=2,
                 polynomial=(1, 0, 1),
-                factor_degrees=(2,),
+                denominator=(1,),
+                parametrizations=(),
+                factor_degrees=(),
+                unfactored_degree=2,
                 squarefree=True,
+                linear_roots=(),
             ),
             SolveTiming(0.01),
         )
 
-    def exact(self, system, *, threads=None):
+    def exact(self, system, *, threads=None, timeout=None):
         self.exact_calls += 1
-        variable_count = len(system.variables)
-        return ExactSolve(
-            ExactRUR(
-                variables=system.variables,
-                linear_form=(0,) * variable_count,
-                polynomial=(-1, 1),
-                denominator=(1,),
-                parametrizations=tuple((((-1,), 1)) for _ in range(variable_count)),
-            ),
-            SolveTiming(0.1),
-        )
+        return ExactSolve(None, SolveTiming(0.1))
 
 
 def test_report_mode_never_prunes(rooted_tetrahedron: RootedPlaneGraph):
@@ -63,8 +58,7 @@ def test_report_mode_never_prunes(rooted_tetrahedron: RootedPlaneGraph):
     assert result.sieve_disposition == SieveDisposition.HEURISTIC_REJECTION
     assert not result.pruned
     assert solver.exact_calls == 1
-    assert len(result.rational_solutions) == 1
-    assert not result.rational_solutions[0].is_mondrian_candidate
+    assert not result.rational_solutions
 
 
 def test_heuristic_mode_prunes(rooted_tetrahedron: RootedPlaneGraph):

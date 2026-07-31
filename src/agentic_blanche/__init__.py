@@ -4,6 +4,7 @@ from agentic_blanche.graph import PlaneGraph, RootedPlaneGraph
 from agentic_blanche.presentations import (
     KirchhoffPresentation,
     build_adaptive_cycle_presentation,
+    build_bilinear_presentation,
     build_edge_current_presentation,
 )
 from agentic_blanche.workflow import SearchConfig, SearchWorkflow, SieveMode
@@ -16,7 +17,8 @@ __all__ = [
     "SearchWorkflow",
     "SieveMode",
     "build_adaptive_cycle_presentation",
+    "build_bilinear_presentation",
     "build_edge_current_presentation",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

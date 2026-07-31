@@ -5,6 +5,24 @@ Let \((G,e_0)\) be a rooted polyhedral graph, with root directed from source
 \(n=|E'|\). Canonically orient every non-root edge from its smaller endpoint
 to its larger endpoint.
 
+## Current-potential bilinear presentation
+
+Set \(h_s=1\) and \(h_t=0\). Introduce a current \(x_e\) for every
+non-root edge and a potential \(h_v\) for every non-terminal vertex. The
+equations are KCL at each non-terminal vertex together with
+
+\[
+x_{uv}(h_u-h_v)=1
+\qquad(uv\in E').
+\]
+
+There are \(n+V-2\) variables and the same number of equations. Each
+unit-area equation makes both factors invertible, so the presentation already
+lives on the current-voltage torus. Summing the unit powers and using KCL
+shows that the source current is \(n\); KVL follows because the voltages are
+potential differences. Thus this defines the same normalized Kirchhoff
+algebra without denominator clearing or a saturation variable.
+
 ## Edge-current presentation
 
 For \(e\in E'\), introduce a signed current \(x_e\). The equations are:
@@ -79,19 +97,26 @@ stretch.
 
 ## Modular evidence
 
-Over \(\mathbf F_p\), an RUR has an \(\mathbf F_p\)-point exactly when its
-separating univariate polynomial has a linear factor, subject to the usual
-validity conditions on the parametrization.
+Over \(\mathbf F_p\), the split linear part of the separating polynomial is
+
+\[
+\gcd(f(t),t^p-t).
+\]
+
+The implementation uses modular exponentiation in
+\(\mathbf F_p[t]/(f)\), so it never constructs \(t^p\). It recovers every
+associated coordinate tuple, checks the presentation, recovers the original
+currents, checks the original KCL and KVL equations, and finally applies the
+two Mondrian noncongruence tests modulo \(p\).
 
 The implementation records:
 
 - special-fiber degree;
-- factor-degree profile;
 - squarefreeness;
 - linear-factor count;
+- finite-field and modular Mondrian-point counts;
 - comparison with an optional expected degree.
 
 A rigorous rational-point obstruction additionally requires a good-reduction
 argument controlling denominators and points at infinity. This is represented
 by the `GoodReductionOracle` interface rather than assumed by the solver.
-

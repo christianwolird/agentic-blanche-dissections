@@ -13,21 +13,36 @@ from typing import Protocol
 import sympy
 
 from agentic_blanche.graph import Edge, RootedPlaneGraph
-from agentic_blanche.msolve import ExactSolve, FiniteSolve
+from agentic_blanche.msolve import ExactSolve, FiniteSolve, SolveTimeout
 from agentic_blanche.presentations import (
     KirchhoffPresentation,
     PresentationKind,
     build_adaptive_cycle_presentation,
+    build_bilinear_presentation,
     build_edge_current_presentation,
     congruence_violations,
+    verifies_kirchhoff_currents,
+    verifies_kirchhoff_currents_mod,
 )
 from agentic_blanche.symmetry import rooted_graph_id
 
 
 class SolverBackend(Protocol):
-    def finite(self, system: object, prime: int) -> FiniteSolve: ...
+    def finite(
+        self,
+        system: object,
+        prime: int,
+        *,
+        timeout: float | None = None,
+    ) -> FiniteSolve: ...
 
-    def exact(self, system: object, *, threads: int | None = None) -> ExactSolve: ...
+    def exact(
+        self,
+        system: object,
+        *,
+        threads: int | None = None,
+        timeout: float | None = None,
+    ) -> ExactSolve: ...
 
 
 class SieveMode(StrEnum):
@@ -41,6 +56,7 @@ class PresentationChoice(StrEnum):
     AUTO = "auto"
     EDGE = "edge"
     CYCLE = "cycle"
+    BILINEAR = "bilinear"
 
 
 class SieveDisposition(StrEnum):
@@ -92,13 +108,19 @@ def descending_primes(count: int, start: int = 65_521) -> tuple[int, ...]:
 class SearchConfig:
     primes: tuple[int, ...] = field(default_factory=lambda: descending_primes(9))
     sieve_mode: SieveMode = SieveMode.REPORT
-    presentation: PresentationChoice = PresentationChoice.AUTO
+    presentation: PresentationChoice = PresentationChoice.BILINEAR
     pilot_presentations: bool = True
-    exact_threads: int = 8
+    exact_threads: int = 1
+    modular_timeout: float | None = 1.0
+    exact_timeout: float | None = None
 
     def __post_init__(self) -> None:
         if self.exact_threads < 1:
             raise ValueError("exact_threads must be positive")
+        if self.modular_timeout is not None and self.modular_timeout <= 0:
+            raise ValueError("modular timeout must be positive")
+        if self.exact_timeout is not None and self.exact_timeout <= 0:
+            raise ValueError("exact timeout must be positive")
         if any(not sympy.isprime(prime) for prime in self.primes):
             raise ValueError("all modular characteristics must be prime")
 
@@ -109,10 +131,14 @@ class ModularProbe:
     seconds: float
     degree: int
     factor_degrees: tuple[int, ...]
+    unfactored_degree: int
     squarefree: bool
     linear_factor_count: int
     expected_degree: int | None
     presentation: str
+    finite_point_count: int
+    mondrian_point_count: int
+    timed_out: bool = False
 
     @property
     def has_full_expected_degree(self) -> bool | None:
@@ -122,7 +148,11 @@ class ModularProbe:
 
     @property
     def has_no_finite_field_point(self) -> bool:
-        return self.linear_factor_count == 0
+        return not self.timed_out and self.finite_point_count == 0
+
+    @property
+    def has_no_mondrian_point(self) -> bool:
+        return not self.timed_out and self.mondrian_point_count == 0
 
 
 @dataclass(frozen=True)
@@ -147,6 +177,7 @@ class SearchResult:
     exact_seconds: float | None
     exact_degree: int | None
     rational_solutions: tuple[RationalSolution, ...]
+    exact_timed_out: bool = False
 
     @property
     def mondrian_candidates(self) -> tuple[RationalSolution, ...]:
@@ -176,8 +207,12 @@ class SearchResult:
                     "seconds": probe.seconds,
                     "degree": probe.degree,
                     "factor_degrees": list(probe.factor_degrees),
+                    "unfactored_degree": probe.unfactored_degree,
                     "squarefree": probe.squarefree,
                     "linear_factor_count": probe.linear_factor_count,
+                    "finite_point_count": probe.finite_point_count,
+                    "mondrian_point_count": probe.mondrian_point_count,
+                    "timed_out": probe.timed_out,
                     "expected_degree": probe.expected_degree,
                 }
                 for probe in self.probes
@@ -186,6 +221,7 @@ class SearchResult:
             "pruned": self.pruned,
             "exact_seconds": self.exact_seconds,
             "exact_degree": self.exact_degree,
+            "exact_timed_out": self.exact_timed_out,
             "rational_solutions": [
                 {
                     "coordinates": {
@@ -220,11 +256,14 @@ class SearchWorkflow:
     ) -> tuple[KirchhoffPresentation, ...]:
         edge = build_edge_current_presentation(rooted)
         cycle = build_adaptive_cycle_presentation(rooted)
+        bilinear = build_bilinear_presentation(rooted)
         if self.config.presentation == PresentationChoice.EDGE:
             return (edge,)
         if self.config.presentation == PresentationChoice.CYCLE:
             return (cycle,)
-        return (edge, cycle)
+        if self.config.presentation == PresentationChoice.BILINEAR:
+            return (bilinear,)
+        return (edge, cycle, bilinear)
 
     def _probe(
         self,
@@ -232,26 +271,79 @@ class SearchWorkflow:
         prime: int,
         expected_degree: int | None,
     ) -> ModularProbe:
-        solve = self.solver.finite(presentation.system, prime)
+        try:
+            solve = self.solver.finite(
+                presentation.system,
+                prime,
+                timeout=self.config.modular_timeout,
+            )
+        except SolveTimeout:
+            return ModularProbe(
+                prime=prime,
+                seconds=float(self.config.modular_timeout or 0),
+                degree=0,
+                factor_degrees=(),
+                unfactored_degree=0,
+                squarefree=False,
+                linear_factor_count=0,
+                expected_degree=expected_degree,
+                presentation=presentation.kind.value,
+                finite_point_count=0,
+                mondrian_point_count=0,
+                timed_out=True,
+            )
         if solve.rur is None:
             degree = 0
             factors: tuple[int, ...] = ()
+            unfactored_degree = 0
             squarefree = True
             linear_count = 0
+            finite_count = 0
+            mondrian_count = 0
         else:
             degree = solve.rur.degree
             factors = solve.rur.factor_degrees
+            unfactored_degree = solve.rur.unfactored_degree
             squarefree = solve.rur.squarefree
             linear_count = solve.rur.linear_factor_count
+            finite_points = tuple(
+                point
+                for point in solve.rur.finite_points()
+                if presentation.verifies(point, modulus=prime)
+            )
+            finite_count = len(finite_points)
+            mondrian_count = 0
+            for point in finite_points:
+                try:
+                    currents = presentation.recover_currents_mod(point, prime)
+                except ZeroDivisionError:
+                    continue
+                if not verifies_kirchhoff_currents_mod(
+                    presentation.rooted,
+                    currents,
+                    prime,
+                ):
+                    raise ValueError(
+                        "finite-field recovery violates original Kirchhoff equations"
+                    )
+                violations = congruence_violations(
+                    currents,
+                    presentation.rooted.rectangle_count,
+                    modulus=prime,
+                )
+                mondrian_count += int(not violations)
         return ModularProbe(
             prime=prime,
             seconds=solve.timing.seconds,
             degree=degree,
             factor_degrees=factors,
+            unfactored_degree=unfactored_degree,
             squarefree=squarefree,
             linear_factor_count=linear_count,
             expected_degree=expected_degree,
             presentation=presentation.kind.value,
+            finite_point_count=finite_count,
+            mondrian_point_count=mondrian_count,
         )
 
     def _choose_presentation(
@@ -267,17 +359,22 @@ class SearchWorkflow:
         ):
             if len(presentations) == 1:
                 return presentations[0], ()
-            cycle = presentations[1]
-            edge = presentations[0]
-            chosen = cycle if cycle.system.term_count < edge.system.term_count else edge
-            return chosen, ()
+            bilinear = next(
+                presentation
+                for presentation in presentations
+                if presentation.kind == PresentationKind.BILINEAR
+            )
+            return bilinear, ()
 
         prime = self.config.primes[0]
         pilots = tuple(
             self._probe(presentation, prime, expected_degree)
             for presentation in presentations
         )
-        fastest_index = min(range(len(pilots)), key=lambda index: pilots[index].seconds)
+        fastest_index = min(
+            range(len(pilots)),
+            key=lambda index: (pilots[index].timed_out, pilots[index].seconds),
+        )
         return presentations[fastest_index], (pilots[fastest_index],)
 
     def _sieve(
@@ -303,7 +400,7 @@ class SearchWorkflow:
                 full_degree = probe.has_full_expected_degree
                 potential_rejection = (
                     probe.squarefree
-                    and probe.has_no_finite_field_point
+                    and probe.has_no_mondrian_point
                     and full_degree is not False
                 )
                 if potential_rejection:
@@ -353,10 +450,25 @@ class SearchWorkflow:
                 rational_solutions=(),
             )
 
-        exact = self.solver.exact(
-            presentation.system,
-            threads=self.config.exact_threads,
-        )
+        try:
+            exact = self.solver.exact(
+                presentation.system,
+                threads=self.config.exact_threads,
+                timeout=self.config.exact_timeout,
+            )
+        except SolveTimeout:
+            return SearchResult(
+                task_id=task_id,
+                rooted=rooted,
+                presentation=presentation.kind,
+                probes=probes,
+                sieve_disposition=disposition,
+                pruned=False,
+                exact_seconds=self.config.exact_timeout,
+                exact_degree=None,
+                rational_solutions=(),
+                exact_timed_out=True,
+            )
         if exact.rur is None:
             degree = 0
             points: tuple[Mapping[str, Fraction], ...] = ()
@@ -366,7 +478,13 @@ class SearchWorkflow:
 
         solutions: list[RationalSolution] = []
         for point in points:
+            if not presentation.verifies(point):
+                raise ValueError("msolve returned a point outside the input variety")
             currents = presentation.recover_currents(point)
+            if not verifies_kirchhoff_currents(rooted, currents):
+                raise ValueError(
+                    "recovered point violates original Kirchhoff equations"
+                )
             violations = congruence_violations(currents, rooted.rectangle_count)
             solutions.append(RationalSolution(point, currents, violations))
         return SearchResult(

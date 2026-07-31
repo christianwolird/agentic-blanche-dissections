@@ -23,6 +23,7 @@ class PresentationKind(StrEnum):
     EDGE_CURRENT = "edge-current"
     CYCLE_PRIMAL = "cycle-primal"
     CYCLE_DUAL = "cycle-dual"
+    BILINEAR = "bilinear"
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,44 @@ class KirchhoffPresentation:
                 value = item.reciprocal_scale / value
             recovered[item.original_edge] = item.orientation_sign * value
         return recovered
+
+    def recover_currents_mod(
+        self,
+        point: Mapping[str, int],
+        prime: int,
+    ) -> dict[Edge, int]:
+        """Recover original currents in ``F_prime`` without creating floats."""
+        coordinates = tuple(point[name] % prime for name in self.system.variables)
+        model_values = {
+            edge: int(current.evaluate(coordinates)) % prime
+            for edge, current in self.model_currents.items()
+        }
+        recovered: dict[Edge, int] = {}
+        for item in self.recovery:
+            value = model_values[item.model_edge]
+            if item.reciprocal_scale is not None:
+                if not value:
+                    raise ZeroDivisionError("model current vanishes modulo prime")
+                value = item.reciprocal_scale * pow(value, -1, prime)
+            recovered[item.original_edge] = item.orientation_sign * value % prime
+        return recovered
+
+    def verifies(
+        self, point: Mapping[str, object], *, modulus: int | None = None
+    ) -> bool:
+        """Check a solver point against every defining equation."""
+        try:
+            coordinates = tuple(point[name] for name in self.system.variables)
+        except KeyError:
+            return False
+        for polynomial in self.system.polynomials:
+            value = polynomial.evaluate(coordinates)
+            if modulus is None:
+                if value != 0:
+                    return False
+            elif int(value) % modulus:
+                return False
+        return True
 
 
 def _incidence_sign(vertex: int, edge: Edge) -> int:
@@ -208,6 +247,79 @@ def build_edge_current_presentation(
             all_names,
             (*kcl, *face_equations, normalization, saturation),
         ),
+        model_currents=current_forms,
+        recovery=recovery,
+    )
+
+
+def build_bilinear_presentation(
+    rooted: RootedPlaneGraph,
+) -> KirchhoffPresentation:
+    """Present the torus Kirchhoff algebra by currents and vertex potentials.
+
+    Put potential one at the source and zero at the sink.  For each non-root
+    edge ``e=(u,v)`` the unit-area condition is
+
+    ``x_e * (h_u - h_v) = 1``.
+
+    Together with KCL at the non-terminal vertices these form a square,
+    sparse, quadratic system.  Nonzero currents and voltage drops are
+    automatic, so no saturation variable or cleared face products are needed.
+    """
+    edges = rooted.nonroot_edges
+    internal_vertices = tuple(
+        vertex
+        for vertex in range(rooted.graph.vertex_count)
+        if vertex not in rooted.root
+    )
+    current_names = tuple(f"x{index}" for index in range(len(edges)))
+    potential_names = tuple(f"h{vertex}" for vertex in internal_vertices)
+    variable_names = (*current_names, *potential_names)
+    variable_count = len(variable_names)
+    edge_index = {edge: index for index, edge in enumerate(edges)}
+    potential_index = {
+        vertex: len(edges) + index for index, vertex in enumerate(internal_vertices)
+    }
+    one = SparsePolynomial.constant(1, variable_count)
+
+    currents = {
+        edge: SparsePolynomial.variable(index, variable_count)
+        for edge, index in edge_index.items()
+    }
+    current_forms = {
+        edge: AffineCurrent(
+            0,
+            tuple(
+                1 if index == edge_index[edge] else 0 for index in range(variable_count)
+            ),
+        )
+        for edge in edges
+    }
+
+    def potential(vertex: int) -> SparsePolynomial:
+        if vertex == rooted.source:
+            return one
+        if vertex == rooted.sink:
+            return SparsePolynomial.zero(variable_count)
+        return SparsePolynomial.variable(potential_index[vertex], variable_count)
+
+    kcl: list[SparsePolynomial] = []
+    for vertex in internal_vertices:
+        equation = SparsePolynomial.zero(variable_count)
+        for edge in edges:
+            if vertex in edge:
+                equation += currents[edge].scale(_incidence_sign(vertex, edge))
+        kcl.append(equation)
+
+    power = tuple(
+        currents[edge] * (potential(edge[0]) - potential(edge[1])) - one
+        for edge in edges
+    )
+    recovery = tuple(CurrentRecovery(edge, edge) for edge in edges)
+    return KirchhoffPresentation(
+        rooted=rooted,
+        kind=PresentationKind.BILINEAR,
+        system=PolynomialSystem(variable_names, (*kcl, *power)),
         model_currents=current_forms,
         recovery=recovery,
     )
@@ -368,7 +480,8 @@ def _build_cycle_on_model(
             CurrentRecovery(
                 original_edge=edge,
                 model_edge=correspondence[edge][0],
-                orientation_sign=correspondence[edge][1],
+                # Dual current follows the right-to-left primal voltage.
+                orientation_sign=-correspondence[edge][1],
                 reciprocal_scale=original.rectangle_count,
             )
             for edge in original.nonroot_edges
@@ -417,14 +530,104 @@ def build_adaptive_cycle_presentation(
 def congruence_violations(
     currents: Mapping[Edge, object],
     rectangle_count: int,
+    *,
+    modulus: int | None = None,
 ) -> tuple[tuple[Edge, Edge, str], ...]:
     """Return all pairs representing congruent rectangles after square scaling."""
     items = tuple(sorted(currents.items()))
     violations: list[tuple[Edge, Edge, str]] = []
     for left_index, (left_edge, left) in enumerate(items):
         for right_edge, right in items[left_index + 1 :]:
-            if left**2 == right**2:
+            parallel = left**2 - right**2
+            rotated = left**2 * right**2 - rectangle_count**2
+            if modulus is not None:
+                parallel %= modulus
+                rotated %= modulus
+            if parallel == 0:
                 violations.append((left_edge, right_edge, "parallel"))
-            elif left**2 * right**2 == rectangle_count**2:
+            elif rotated == 0:
                 violations.append((left_edge, right_edge, "rotated"))
     return tuple(violations)
+
+
+def verifies_kirchhoff_currents(
+    rooted: RootedPlaneGraph,
+    currents: Mapping[Edge, object],
+) -> bool:
+    """Verify the recovered currents in the original graph over Q."""
+    if set(currents) != set(rooted.nonroot_edges):
+        return False
+    if any(value == 0 for value in currents.values()):
+        return False
+
+    divergences: dict[int, object] = {
+        vertex: 0 for vertex in range(rooted.graph.vertex_count)
+    }
+    for edge, value in currents.items():
+        divergences[edge[0]] += value
+        divergences[edge[1]] -= value
+    for vertex, divergence in divergences.items():
+        expected = 0
+        if vertex == rooted.source:
+            expected = rooted.rectangle_count
+        elif vertex == rooted.sink:
+            expected = -rooted.rectangle_count
+        if divergence != expected:
+            return False
+
+    faces, boundary = rooted.graph.faces_and_boundary
+    root_faces = {
+        boundary[(rooted.source, rooted.sink)],
+        boundary[(rooted.sink, rooted.source)],
+    }
+    for face_id, face in enumerate(faces):
+        if face_id in root_faces:
+            continue
+        voltage_sum = 0
+        for dart in face:
+            edge = canonical_edge(dart)
+            sign = 1 if dart == edge else -1
+            voltage_sum += sign / currents[edge]
+        if voltage_sum != 0:
+            return False
+    return True
+
+
+def verifies_kirchhoff_currents_mod(
+    rooted: RootedPlaneGraph,
+    currents: Mapping[Edge, int],
+    prime: int,
+) -> bool:
+    """Verify recovered currents in the original graph over ``F_prime``."""
+    if set(currents) != set(rooted.nonroot_edges):
+        return False
+    currents = {edge: value % prime for edge, value in currents.items()}
+    if any(value == 0 for value in currents.values()):
+        return False
+
+    divergences = [0] * rooted.graph.vertex_count
+    for (tail, head), value in currents.items():
+        divergences[tail] = (divergences[tail] + value) % prime
+        divergences[head] = (divergences[head] - value) % prime
+    expected = [0] * rooted.graph.vertex_count
+    expected[rooted.source] = rooted.rectangle_count % prime
+    expected[rooted.sink] = -rooted.rectangle_count % prime
+    if divergences != expected:
+        return False
+
+    faces, boundary = rooted.graph.faces_and_boundary
+    root_faces = {
+        boundary[(rooted.source, rooted.sink)],
+        boundary[(rooted.sink, rooted.source)],
+    }
+    for face_id, face in enumerate(faces):
+        if face_id in root_faces:
+            continue
+        voltage_sum = 0
+        for dart in face:
+            edge = canonical_edge(dart)
+            sign = 1 if dart == edge else -1
+            voltage_sum += sign * pow(currents[edge], -1, prime)
+        if voltage_sum % prime:
+            return False
+    return True

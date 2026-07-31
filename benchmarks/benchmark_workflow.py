@@ -10,6 +10,7 @@ from agentic_blanche.msolve import MSolve
 from agentic_blanche.plantri import Plantri
 from agentic_blanche.presentations import (
     build_adaptive_cycle_presentation,
+    build_bilinear_presentation,
     build_edge_current_presentation,
 )
 from agentic_blanche.symmetry import edge_orbit_representatives
@@ -44,6 +45,7 @@ def main() -> None:
     presentations = (
         build_edge_current_presentation(rooted),
         build_adaptive_cycle_presentation(rooted),
+        build_bilinear_presentation(rooted),
     )
     rows = []
     for presentation in presentations:
@@ -67,13 +69,19 @@ def main() -> None:
         }
         print(json.dumps(row), flush=True)
         rows.append(row)
+    baseline = rows[0]
     print(
         json.dumps(
             {
-                "exact_speedup": (rows[0]["exact_seconds"] / rows[1]["exact_seconds"]),
-                "modular_speedup": (
-                    rows[0]["modular_seconds"] / rows[1]["modular_seconds"]
-                ),
+                row["presentation"]: {
+                    "exact_speedup_vs_edge": (
+                        baseline["exact_seconds"] / row["exact_seconds"]
+                    ),
+                    "modular_speedup_vs_edge": (
+                        baseline["modular_seconds"] / row["modular_seconds"]
+                    ),
+                }
+                for row in rows[1:]
             }
         )
     )
