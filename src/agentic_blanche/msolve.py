@@ -16,6 +16,36 @@ import sympy
 from agentic_blanche.polynomial import PolynomialSystem
 
 
+def _literal_eval_with_fractions(serialized: str) -> object:
+    """Parse msolve's list syntax, including characteristic-zero ``a/b``."""
+
+    def convert(node: ast.AST) -> object:
+        if isinstance(node, ast.Expression):
+            return convert(node.body)
+        if isinstance(node, ast.List):
+            return [convert(item) for item in node.elts]
+        if isinstance(node, ast.Tuple):
+            return tuple(convert(item) for item in node.elts)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, str)):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = convert(node.operand)
+            if not isinstance(value, (int, Fraction)):
+                raise ValueError("invalid unary operand in msolve output")
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            numerator = convert(node.left)
+            denominator = convert(node.right)
+            if not isinstance(numerator, (int, Fraction)) or not isinstance(
+                denominator, (int, Fraction)
+            ):
+                raise ValueError("invalid fraction in msolve output")
+            return Fraction(numerator, denominator)
+        raise ValueError("unsupported expression in msolve output")
+
+    return convert(ast.parse(serialized, mode="eval"))
+
+
 def _decode_univariate(encoding: object) -> tuple[int, ...]:
     degree, coefficients = encoding  # type: ignore[misc]
     coefficients = tuple(int(coefficient) for coefficient in coefficients)
@@ -34,6 +64,40 @@ def _decode_parametrization(
     if len(values) == 2:
         return _decode_univariate(values[0]), int(values[1])
     raise ValueError("invalid coordinate parametrization encoding")
+
+
+def _rur_variables(
+    variables: tuple[str, ...],
+    linear_form: tuple[object, ...],
+    coordinate_count: int,
+    expected_variables: tuple[str, ...] | None,
+) -> tuple[tuple[str, ...], tuple[object, ...]]:
+    """Remove msolve's appended primitive-element variable when present."""
+    if expected_variables is not None:
+        expected = set(expected_variables)
+        returned = set(variables)
+        if len(variables) == len(expected_variables) and returned == expected:
+            return variables, linear_form
+        if (
+            len(variables) == len(expected_variables) + 1
+            and expected < returned
+            and coordinate_count == len(expected_variables)
+        ):
+            auxiliary_indices = [
+                index
+                for index, variable in enumerate(variables)
+                if variable not in expected
+            ]
+            if len(auxiliary_indices) == 1:
+                auxiliary = auxiliary_indices[0]
+                return (
+                    variables[:auxiliary] + variables[auxiliary + 1 :],
+                    linear_form[:auxiliary] + linear_form[auxiliary + 1 :],
+                )
+        raise ValueError("RUR variables do not match the input system")
+    if variables and variables[-1] == "A" and coordinate_count == len(variables) - 1:
+        return variables[:-1], linear_form[:-1]
+    return variables, linear_form
 
 
 def _evaluate(coefficients: tuple[int, ...], value: Fraction) -> Fraction:
@@ -83,12 +147,10 @@ def _finite_linear_roots(polynomial: sympy.Poly, prime: int) -> tuple[int, ...]:
     if linear_part.degree() <= 0:
         return ()
     roots: list[int] = []
-    for factor, multiplicity in sympy.factor_list(linear_part)[1]:
-        if factor.degree() != 1:
-            raise ValueError("Frobenius gcd contained a non-linear factor")
-        leading, constant = (int(value) % prime for value in factor.all_coeffs())
-        root = (-constant * pow(leading, -1, prime)) % prime
-        roots.extend([root] * multiplicity)
+    for root, multiplicity in sympy.polys.polytools.ground_roots(linear_part).items():
+        roots.extend([int(root) % prime] * multiplicity)
+    if len(roots) != linear_part.degree():
+        raise ValueError("Frobenius gcd contained a non-linear factor")
     return tuple(sorted(roots))
 
 
@@ -218,9 +280,13 @@ class SolveTimeout(RuntimeError):
         self.seconds = seconds
 
 
-def parse_exact_rur(output: str) -> ExactRUR | None:
+def parse_exact_rur(
+    output: str,
+    *,
+    expected_variables: tuple[str, ...] | None = None,
+) -> ExactRUR | None:
     serialized = output.strip().rstrip(":")
-    data = ast.literal_eval(serialized)
+    data = _literal_eval_with_fractions(serialized)
     if data == [-1]:
         return None
     payload = data[1]
@@ -232,16 +298,26 @@ def parse_exact_rur(output: str) -> ExactRUR | None:
     if count != 1:
         raise ValueError("expected one RUR component")
     polynomial, denominator, coordinates = parametrization
+    variables, linear_form = _rur_variables(
+        tuple(payload[3]),
+        tuple(Fraction(value) for value in payload[4]),
+        len(coordinates),
+        expected_variables,
+    )
     return ExactRUR(
-        variables=tuple(payload[3]),
-        linear_form=tuple(Fraction(value) for value in payload[4]),
+        variables=variables,
+        linear_form=linear_form,
         polynomial=_decode_univariate(polynomial),
         denominator=_decode_univariate(denominator),
         parametrizations=tuple(_decode_parametrization(item) for item in coordinates),
     )
 
 
-def parse_finite_rur(output: str) -> FiniteRUR | None:
+def parse_finite_rur(
+    output: str,
+    *,
+    expected_variables: tuple[str, ...] | None = None,
+) -> FiniteRUR | None:
     serialized = output.strip().rstrip(":")
     data = ast.literal_eval(serialized)
     if data == [-1]:
@@ -254,6 +330,12 @@ def parse_finite_rur(output: str) -> FiniteRUR | None:
     if count != 1:
         raise ValueError("expected one finite-field RUR component")
     polynomial_encoding, denominator_encoding, coordinate_encodings = parametrization
+    variables, linear_form = _rur_variables(
+        tuple(payload[3]),
+        tuple(int(value) for value in payload[4]),
+        len(coordinate_encodings),
+        expected_variables,
+    )
     degree, coefficients = polynomial_encoding
     coefficients = tuple(int(coefficient) for coefficient in coefficients)
     parameter = sympy.Symbol("t")
@@ -271,8 +353,8 @@ def parse_finite_rur(output: str) -> FiniteRUR | None:
     squarefree = sympy.gcd(polynomial, polynomial.diff()).degree() == 0
     return FiniteRUR(
         prime=prime,
-        variables=tuple(payload[3]),
-        linear_form=tuple(int(value) for value in payload[4]),
+        variables=variables,
+        linear_form=linear_form,
         degree=int(degree),
         polynomial=coefficients,
         denominator=_decode_univariate(denominator_encoding),
@@ -360,7 +442,10 @@ class MSolve:
             threads=threads,
             timeout=timeout,
         )
-        return ExactSolve(parse_exact_rur(output), timing)
+        return ExactSolve(
+            parse_exact_rur(output, expected_variables=system.variables),
+            timing,
+        )
 
     def finite(
         self,
@@ -375,4 +460,7 @@ class MSolve:
             threads=1,
             timeout=timeout,
         )
-        return FiniteSolve(parse_finite_rur(output), timing)
+        return FiniteSolve(
+            parse_finite_rur(output, expected_variables=system.variables),
+            timing,
+        )

@@ -67,6 +67,7 @@ def test_parse_finite_rur_factor_degrees():
     assert rur.factor_degrees == (1, 1)
     assert rur.unfactored_degree == 0
     assert rur.linear_factor_count == 2
+    assert rur.linear_roots == (1, 100)
 
 
 def test_finite_rur_recovers_linear_root_coordinates():
@@ -96,6 +97,134 @@ def test_finite_rur_recovers_linear_root_coordinates():
     rur = parse_finite_rur(output)
     assert rur is not None
     assert rur.finite_points() == ({"x": 3, "y": 7},)
+
+
+def test_finite_rur_accepts_permuted_coordinate_primitive():
+    output = (
+        repr(
+            [
+                0,
+                [
+                    101,
+                    2,
+                    1,
+                    ["y", "x"],
+                    [0, 1],
+                    [
+                        1,
+                        [
+                            [1, [-7, 1]],
+                            [0, [1]],
+                            [[[0, [-3]], 1]],
+                        ],
+                    ],
+                ],
+            ]
+        )
+        + ":"
+    )
+    rur = parse_finite_rur(output, expected_variables=("x", "y"))
+    assert rur is not None
+    assert rur.variables == ("y", "x")
+    assert rur.finite_points() == ({"y": 3, "x": 7},)
+
+
+def test_exact_rur_accepts_permuted_coordinate_primitive():
+    output = (
+        repr(
+            [
+                0,
+                [
+                    0,
+                    2,
+                    1,
+                    ["y", "x"],
+                    [0, 1],
+                    [
+                        1,
+                        [
+                            [1, [-7, 1]],
+                            [0, [1]],
+                            [[[0, [-3]], 1]],
+                        ],
+                    ],
+                ],
+            ]
+        )
+        + ":"
+    )
+    rur = parse_exact_rur(output, expected_variables=("x", "y"))
+    assert rur is not None
+    assert rur.variables == ("y", "x")
+    assert rur.rational_points() == ({"y": Fraction(3), "x": Fraction(7)},)
+
+
+def test_finite_rur_ignores_appended_primitive_element():
+    output = (
+        repr(
+            [
+                0,
+                [
+                    101,
+                    3,
+                    1,
+                    ["x", "y", "A"],
+                    [2, 3, 1],
+                    [
+                        1,
+                        [
+                            [1, [-7, 1]],
+                            [0, [1]],
+                            [
+                                [[0, [-3]], 1],
+                                [[0, [-4]], 1],
+                            ],
+                        ],
+                    ],
+                ],
+            ]
+        )
+        + ":"
+    )
+    rur = parse_finite_rur(output, expected_variables=("x", "y"))
+    assert rur is not None
+    assert rur.variables == ("x", "y")
+    assert rur.finite_points() == ({"x": 3, "y": 4},)
+
+
+def test_exact_rur_ignores_appended_primitive_element():
+    output = (
+        repr(
+            [
+                0,
+                [
+                    0,
+                    3,
+                    1,
+                    ["x", "y", "A"],
+                    [2, 3, 1],
+                    [
+                        1,
+                        [
+                            [1, [-7, 1]],
+                            [0, [1]],
+                            [
+                                [[0, [-3]], 1],
+                                [[0, [-4]], 1],
+                            ],
+                        ],
+                    ],
+                ],
+            ]
+        )
+        + ":"
+    )
+    output = output.replace("[2, 3, 1]", "[1/2, 1/3, 1]", 1)
+    rur = parse_exact_rur(output, expected_variables=("x", "y"))
+    assert rur is not None
+    assert rur.variables == ("x", "y")
+    assert rur.linear_form == (Fraction(1, 2), Fraction(1, 3))
+    assert rur.rational_points() == ({"x": Fraction(3), "y": Fraction(4)},)
 
 
 def test_parse_empty_variety():
