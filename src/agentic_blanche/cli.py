@@ -342,14 +342,7 @@ def _run_edge(args: argparse.Namespace, edges: int) -> EdgeSummary:
     counts = store.counts()
     rational_points, candidates = _solution_counts(store)
     seconds = time.monotonic() - started
-    print(
-        f"  finished E{edges} in {_duration(seconds)}: "
-        f"{counts[TaskStatus.SHELVED.value]:,} shelved, "
-        f"{counts[TaskStatus.COMPLETED.value]:,} exact-completed, "
-        f"{candidates:,} candidate{'s' if candidates != 1 else ''}.",
-        flush=True,
-    )
-    return EdgeSummary(
+    summary = EdgeSummary(
         edges=edges,
         tasks=sum(counts.values()),
         queued=queued,
@@ -360,6 +353,9 @@ def _run_edge(args: argparse.Namespace, edges: int) -> EdgeSummary:
         seconds=seconds,
         database=output,
     )
+    print("\nEdge count complete:", flush=True)
+    print(_table(SUMMARY_HEADERS, [_summary_row(summary)]), flush=True)
+    return summary
 
 
 def _table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
@@ -377,41 +373,42 @@ def _table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
     return "\n".join((line(headers), line(separator), *(line(row) for row in rows)))
 
 
+SUMMARY_HEADERS = (
+    "Edges",
+    "Tasks",
+    "Shelved",
+    "Exact",
+    "Timeout",
+    "Failed",
+    "Q-points",
+    "Candidates",
+    "Time",
+)
+
+
+def _summary_row(summary: EdgeSummary) -> tuple[str, ...]:
+    return (
+        str(summary.edges),
+        f"{summary.tasks:,}",
+        f"{summary.counts[TaskStatus.SHELVED.value]:,}",
+        f"{summary.counts[TaskStatus.COMPLETED.value]:,}",
+        f"{summary.counts[TaskStatus.TIMED_OUT.value]:,}",
+        f"{summary.counts[TaskStatus.FAILED.value]:,}",
+        f"{summary.rational_points:,}",
+        f"{summary.candidates:,}",
+        _duration(summary.seconds),
+    )
+
+
 def _print_summary(
     summaries: list[EdgeSummary],
     min_edges: int,
     max_edges: int,
 ) -> None:
-    rows = [
-        (
-            str(summary.edges),
-            f"{summary.tasks:,}",
-            f"{summary.counts[TaskStatus.SHELVED.value]:,}",
-            f"{summary.counts[TaskStatus.COMPLETED.value]:,}",
-            f"{summary.counts[TaskStatus.TIMED_OUT.value]:,}",
-            f"{summary.counts[TaskStatus.FAILED.value]:,}",
-            f"{summary.rational_points:,}",
-            f"{summary.candidates:,}",
-            _duration(summary.seconds),
-        )
-        for summary in summaries
-    ]
+    rows = [_summary_row(summary) for summary in summaries]
     print(f"\nSearch complete: inclusive edge range {min_edges}–{max_edges}")
     print(
-        _table(
-            (
-                "Edges",
-                "Tasks",
-                "Shelved",
-                "Exact",
-                "Timeout",
-                "Failed",
-                "Q-points",
-                "Candidates",
-                "Time",
-            ),
-            rows,
-        )
+        _table(SUMMARY_HEADERS, rows)
     )
     candidates = sum(summary.candidates for summary in summaries)
     if candidates:

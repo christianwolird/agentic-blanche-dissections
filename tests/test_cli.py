@@ -52,7 +52,9 @@ def test_search_rejects_reversed_range(capsys):
     assert "MAX_EDGES must be greater than or equal" in capsys.readouterr().err
 
 
-def test_empty_edge_layer_writes_and_checks_database(tmp_path, monkeypatch):
+def test_empty_edge_layer_writes_checks_and_prints_summary_row(
+    tmp_path, monkeypatch, capsys
+):
     class EmptyPlantri:
         def __init__(self, executable):
             self.executable = executable
@@ -73,3 +75,38 @@ def test_empty_edge_layer_writes_and_checks_database(tmp_path, monkeypatch):
     assert summary.database == tmp_path / "E7.sqlite"
     assert summary.database.exists()
     assert (tmp_path / "E7.manifest.json").exists()
+    output = capsys.readouterr().out
+    assert "Edge count complete:" in output
+    lines = output.splitlines()
+    completion = lines.index("Edge count complete:")
+    assert lines[completion + 1].split() == list(cli.SUMMARY_HEADERS)
+    assert lines[completion + 3].split()[:8] == ["7", "0", "0", "0", "0", "0", "0", "0"]
+
+
+def test_summary_row_formatter_is_shared_by_edge_and_final_tables():
+    counts = _empty_counts()
+    counts[TaskStatus.SHELVED.value] = 1_234
+    counts[TaskStatus.COMPLETED.value] = 56
+    summary = cli.EdgeSummary(
+        edges=12,
+        tasks=1_290,
+        queued=1_290,
+        requeued=0,
+        counts=counts,
+        rational_points=7,
+        candidates=2,
+        seconds=65,
+        database=Path("results/E12.sqlite"),
+    )
+
+    assert cli._summary_row(summary) == (
+        "12",
+        "1,290",
+        "1,234",
+        "56",
+        "0",
+        "0",
+        "7",
+        "2",
+        "1m 05s",
+    )
