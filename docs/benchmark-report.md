@@ -134,8 +134,7 @@ For the first complete pass through 21 edges:
 Example:
 
 ```bash
-agentic-blanche search \
-  --edges 21 \
+agentic-blanche search 21 21 \
   --presentation bilinear \
   --sieve-mode heuristic-prune \
   --prime-count 9 \

@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -54,23 +55,31 @@ class StoredTask:
     attempts: int
 
 
-@dataclass(frozen=True)
+@dataclass
 class SQLiteTaskStore:
     """A small leasing queue backed by SQLite in WAL mode."""
 
     path: Path
+    _initialized: bool = field(default=False, init=False, repr=False)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=NORMAL")
-        connection.execute("PRAGMA busy_timeout=30000")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA synchronous=NORMAL")
+            connection.execute("PRAGMA busy_timeout=30000")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def initialize(self) -> None:
+        if self._initialized:
+            return
         with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -95,9 +104,14 @@ class SQLiteTaskStore:
                 );
                 """
             )
+        self._initialized = True
+
+    def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            self.initialize()
 
     def enqueue(self, rooted: RootedPlaneGraph) -> bool:
-        self.initialize()
+        self._ensure_initialized()
         task_id = rooted_graph_id(rooted.graph, rooted.root)
         timestamp = _now()
         with self._connect() as connection:
@@ -118,7 +132,7 @@ class SQLiteTaskStore:
             return cursor.rowcount == 1
 
     def enqueue_many(self, rooted_graphs: Iterable[RootedPlaneGraph]) -> int:
-        self.initialize()
+        self._ensure_initialized()
         inserted = 0
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -156,7 +170,7 @@ class SQLiteTaskStore:
     ) -> StoredTask | None:
         if lease_seconds <= 0:
             raise ValueError("lease duration must be positive")
-        self.initialize()
+        self._ensure_initialized()
         now = datetime.now(UTC)
         expires = now + timedelta(seconds=lease_seconds)
         with self._connect() as connection:
@@ -240,7 +254,7 @@ class SQLiteTaskStore:
         forbidden = {TaskStatus.PENDING.value, TaskStatus.RUNNING.value}
         if forbidden.intersection(values):
             raise ValueError("only terminal task states can be requeued")
-        self.initialize()
+        self._ensure_initialized()
         placeholders = ",".join("?" for _ in values)
         with self._connect() as connection:
             cursor = connection.execute(
@@ -262,7 +276,7 @@ class SQLiteTaskStore:
         result: str | None = None,
         error: str | None = None,
     ) -> None:
-        self.initialize()
+        self._ensure_initialized()
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -284,7 +298,7 @@ class SQLiteTaskStore:
                 raise RuntimeError(f"task {task_id} is not held by a worker")
 
     def record_manifest(self, run_id: str, manifest: Mapping[str, object]) -> None:
-        self.initialize()
+        self._ensure_initialized()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -295,7 +309,7 @@ class SQLiteTaskStore:
             )
 
     def counts(self) -> dict[str, int]:
-        self.initialize()
+        self._ensure_initialized()
         counts = {status.value: 0 for status in TaskStatus}
         with self._connect() as connection:
             for row in connection.execute(
@@ -305,7 +319,7 @@ class SQLiteTaskStore:
         return counts
 
     def results(self) -> Iterator[dict[str, object]]:
-        self.initialize()
+        self._ensure_initialized()
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -313,6 +327,22 @@ class SQLiteTaskStore:
                 WHERE result IS NOT NULL
                 ORDER BY sequence
                 """
-            ).fetchall()
-        for row in rows:
-            yield json.loads(str(row["result"]))
+            )
+            for row in rows:
+                yield json.loads(str(row["result"]))
+
+    def checkpoint_and_check(self) -> None:
+        """Checkpoint the WAL and fail if the standalone database is damaged."""
+        self._ensure_initialized()
+        with self._connect() as connection:
+            busy, _, _ = connection.execute(
+                "PRAGMA wal_checkpoint(TRUNCATE)"
+            ).fetchone()
+            if busy:
+                raise RuntimeError("could not checkpoint SQLite WAL: database is busy")
+            errors = [
+                str(row[0]) for row in connection.execute("PRAGMA integrity_check")
+            ]
+        if errors != ["ok"]:
+            detail = "\n".join(errors[:5])
+            raise RuntimeError(f"SQLite integrity check failed:\n{detail}")

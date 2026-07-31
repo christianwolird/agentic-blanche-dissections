@@ -1,5 +1,7 @@
 import sqlite3
 
+import pytest
+
 from agentic_blanche.presentations import PresentationKind
 from agentic_blanche.storage import SQLiteTaskStore, TaskStatus
 from agentic_blanche.symmetry import rooted_graph_id
@@ -18,6 +20,15 @@ def test_sqlite_store_uses_wal_and_deduplicates(tmp_path, rooted_tetrahedron):
     )
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_store_closes_every_connection(tmp_path):
+    store = SQLiteTaskStore(tmp_path / "tasks.sqlite")
+    with store._connect() as connection:
+        assert connection.execute("SELECT 1").fetchone()[0] == 1
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1")
 
 
 def test_finished_task_is_not_reclaimed(tmp_path, rooted_tetrahedron):
@@ -40,5 +51,6 @@ def test_finished_task_is_not_reclaimed(tmp_path, rooted_tetrahedron):
     assert store.claim("worker-2") is None
     assert store.counts()["completed"] == 1
     assert tuple(store.results())[0]["task_id"] == task.task_id
+    store.checkpoint_and_check()
     assert store.requeue((TaskStatus.COMPLETED,)) == 1
     assert store.claim("worker-2") is not None

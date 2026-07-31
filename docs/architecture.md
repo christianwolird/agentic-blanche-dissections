@@ -53,7 +53,9 @@ SQLite runs in WAL mode. Workers atomically lease pending tasks, and expired
 leases return to the queue after an interrupted process. Rooted graph IDs are
 nauty certificates of vertex-colored graphs, so resume keys are independent
 of plantri's temporary labels. Results and run manifests are committed in the
-same persistent database.
+same persistent database. Every connection is explicitly closed before a
+worker forks or exits; the CLI checkpoints the WAL and runs an integrity check
+after each edge layer.
 
 ## Intended extensions
 

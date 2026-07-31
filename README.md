@@ -15,9 +15,10 @@ in [`blanche-dissections`](https://github.com/christianwolird/blanche-dissection
 6. solve survivors over the rationals and verify the original KCL and KVL
    equations independently of the solver presentation.
 
-The safe default treats the modular stage as evidence, not as a proof. It
-continues to characteristic zero unless heuristic pruning is explicitly
-enabled or a good-reduction certificate is supplied.
+The library's conservative `report` mode treats the modular stage as
+evidence, not as a proof. The human-facing search command defaults to the
+experimentally effective `heuristic-prune` mode for large searches and labels
+that limitation in its final report.
 
 ## Mathematical normalization
 
@@ -103,49 +104,79 @@ on the command line.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev]'
+pip install -e .
 ```
+
+Contributors can install the test and lint tools with
+`pip install -e '.[dev]'`.
 
 ## Usage
 
-Count or inspect rooted tasks without solving:
+The normal command takes the first and last graph-edge counts. Both endpoints
+are included, so this searches 7, 8, 9, 10, and 11 edges:
 
 ```bash
-agentic-blanche enumerate --edges 18 --limit 10
+agentic-blanche search 7 11
 ```
 
-Run the safe workflow. Modular results are recorded, but every task still
-receives an exact solve:
+The command-line defaults are chosen for the heuristic search workflow:
+
+- bilinear current-potential presentation;
+- nine finite-field probes, with one second allowed per probe;
+- heuristic modular pruning followed by exact solving of survivors;
+- 30 seconds allowed per exact solve;
+- up to eight worker processes, bounded by the machine's CPU count;
+- a progress line every 30 seconds during long edge layers.
+
+Each edge count has its own database and reproducibility manifest, for example
+`results/E11.sqlite` and `results/E11.manifest.json`. Repeating the same
+command resumes from those databases. At the end, the CLI checkpoints the WAL,
+runs a SQLite integrity check, and prints a table of shelved tasks, exact
+solves, timeouts, failures, rational points, and Mondrian candidates.
+
+To search one edge count, repeat it:
 
 ```bash
-agentic-blanche search \
-  --edges 18 \
-  --sieve-mode report \
-  --prime-count 9 \
-  --workers 4
+agentic-blanche search 17 17
 ```
 
-Use the experimentally effective, but not presently proof-producing,
-modular pruning mode:
+Use the conservative non-pruning workflow when heuristic rejection is not
+acceptable. Modular probes are still recorded, but every task proceeds to an
+exact solve:
 
 ```bash
-agentic-blanche search \
-  --edges 21 \
-  --sieve-mode heuristic-prune \
-  --prime-count 9 \
-  --modular-timeout 1 \
-  --workers 8
+agentic-blanche search 7 11 --sieve-mode report
 ```
 
-Tasks and results are stored in `results/E21.sqlite`. The database uses WAL
-mode and leased claims, so repeating the command resumes safely after an
-interruption. A neighboring manifest records the commit, command, search
-configuration, platform, and solver versions.
+If the executables are not on `PATH`, give their locations once on the same
+command:
+
+```bash
+agentic-blanche search 7 11 \
+  --plantri /path/to/plantri \
+  --msolve /path/to/msolve
+```
+
+Count rooted graph/orbit tasks without solving:
+
+```bash
+agentic-blanche enumerate 18
+agentic-blanche enumerate 18 --limit 10 --verbose
+```
+
+The built-in help shows defaults and examples:
+
+```bash
+agentic-blanche --help
+agentic-blanche search --help
+```
 
 Useful options:
 
 ```text
+--results-dir DIRECTORY
 --presentation bilinear|auto|edge|cycle
+--sieve-mode heuristic-prune|report|off|certified-prune
 --no-pilot
 --include-duals
 --plantri /path/to/plantri
@@ -153,6 +184,7 @@ Useful options:
 --workers PROCESSES
 --modular-timeout SECONDS
 --exact-timeout SECONDS
+--progress-interval SECONDS
 --requeue completed|shelved|timed-out|failed
 --limit TASKS
 ```
@@ -160,8 +192,7 @@ Useful options:
 For example, revisit the shelved queue without modular pruning:
 
 ```bash
-agentic-blanche search \
-  --edges 21 \
+agentic-blanche search 21 21 \
   --sieve-mode off \
   --requeue shelved \
   --exact-timeout 600 \
