@@ -164,6 +164,61 @@ agentic-blanche enumerate 18
 agentic-blanche enumerate 18 --limit 10 --verbose
 ```
 
+### Visualize every real solution of a task
+
+The visualization tool takes a search database and either the task's sequence
+number or canonical task ID. It reruns the exact solve and draws every real
+solution, rational or irrational, in one SVG:
+
+```bash
+python tools/visualize_task.py results/E8.sqlite \
+  4e6514469bf044184dfd8049
+```
+
+The default output for this example is
+`results/visualizations/E8-task-1.svg`. A sequence number is also accepted:
+
+```bash
+python tools/visualize_task.py results/E8.sqlite 1
+```
+
+Each panel shows a square tiling and gives the solution's algebraic degree and
+congruency-class partition. Rectangle IDs are the one-based positions of the
+sorted non-root graph edges, so a given rectangle has the same ID in every
+solution of the task. Singleton congruency classes use Solarized Light's
+`#fdf6e3`; every non-singleton class receives its own accent color.
+
+The rectangle coordinates are evaluated to 80 decimal digits by default before
+conversion to display coordinates. Congruency is not decided numerically: the
+tool reduces
+
+\[
+x_e^2-x_f^2
+\qquad\text{and}\qquad
+x_e^2x_f^2-n^2
+\]
+
+exactly modulo the irreducible RUR factor for each algebraic solution. The
+factor's degree is the degree printed on the panel. The SVG also embeds the
+task-to-rectangle ID map and exact congruency classes as metadata.
+
+Useful options include:
+
+```text
+--output FILE.svg
+--msolve /path/to/msolve
+--presentation stored|bilinear|edge-current|cycle-primal|cycle-dual
+--precision DIGITS
+--threads THREADS
+--timeout SECONDS
+--columns COUNT
+```
+
+The exact RUR itself is not retained in existing task rows, so visualization
+reruns the characteristic-zero solve. See
+[`examples/visualizations`](examples/visualizations) for rational and
+irrational examples.
+
 The built-in help shows defaults and examples:
 
 ```bash

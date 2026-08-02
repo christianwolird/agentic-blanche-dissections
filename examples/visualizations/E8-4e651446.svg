@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1030" height="1160" viewBox="0 0 1030 1160">
+<title>Task 4e6514469bf044184dfd8049 · 7 rectangles · 3 real solutions</title>
+<desc>Equal-area square tilings. Rectangle numbers refer to the sorted non-root edges and remain fixed across solutions.</desc>
+<metadata>{&quot;database&quot;: &quot;E8.sqlite&quot;, &quot;rectangle_ids&quot;: {&quot;1&quot;: [0, 2], &quot;2&quot;: [0, 3], &quot;3&quot;: [1, 3], &quot;4&quot;: [1, 4], &quot;5&quot;: [2, 3], &quot;6&quot;: [2, 4], &quot;7&quot;: [3, 4]}, &quot;sequence&quot;: 1, &quot;solutions&quot;: [{&quot;algebraic_degree&quot;: 2, &quot;congruence_classes&quot;: [[1], [2], [3], [4], [5], [6], [7]], &quot;minimal_factor&quot;: &quot;147*t**2 - 112*t + 15&quot;, &quot;parameter_approximation&quot;: &quot;0.17338576459330125941728657219716115908871409879845500300522170770668774627604009&quot;, &quot;partition&quot;: &quot;7=1+...&quot;}, {&quot;algebraic_degree&quot;: 1, &quot;congruence_classes&quot;: [[1, 4], [2, 3], [5, 7], [6]], &quot;minimal_factor&quot;: &quot;5*t - 1&quot;, &quot;parameter_approximation&quot;: &quot;0.20000000000000000000000000000000000000000000000000000000000000000000000000000000&quot;, &quot;partition&quot;: &quot;7=2+2+2+1&quot;}, {&quot;algebraic_degree&quot;: 2, &quot;congruence_classes&quot;: [[1], [2], [3], [4], [5], [6], [7]], &quot;minimal_factor&quot;: &quot;147*t**2 - 112*t + 15&quot;, &quot;parameter_approximation&quot;: &quot;0.58851899731146064534461818970760074567319066310630690175668305419807415848586467&quot;, &quot;partition&quot;: &quot;7=1+...&quot;}], &quot;task_id&quot;: &quot;4e6514469bf044184dfd8049&quot;}</metadata>
+<rect width="1030" height="1160" fill="#ffffff"/>
+<text x="30" y="34" font-family="DejaVu Sans, sans-serif" font-size="20" font-weight="700" fill="#000000">Task 4e6514469bf044184dfd8049 · 7 rectangles · 3 real solutions</text>
+<text x="50" y="79" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="700" fill="#000000">Solution 1</text>
+<text x="50" y="101" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#333333">Algebraic degree 2</text>
+<text x="50" y="120" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#333333">Congruency 7=1+...</text>
+<rect x="50.0000000" y="128.0000000" width="106.8056310" height="258.9483588" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 1; edge 0-2</title></rect>
+<text x="103.4028155" y="257.4741794" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">1</text>
+<rect x="156.8056310" y="128.0000000" width="333.1943690" height="83.0060332" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 2; edge 0-3</title></rect>
+<text x="323.4028155" y="169.5030166" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">2</text>
+<rect x="412.5277023" y="211.0060332" width="77.4722977" height="356.9939668" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 3; edge 1-3</title></rect>
+<text x="451.2638512" y="389.5030166" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">3</text>
+<rect x="50.0000000" y="491.7102636" width="362.5277023" height="76.2897364" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 4; edge 1-4</title></rect>
+<text x="231.2638512" y="529.8551318" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">4</text>
+<rect x="156.8056310" y="211.0060332" width="157.1943690" height="175.9423256" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 5; edge 2-3</title></rect>
+<text x="235.4028155" y="298.9771960" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">5</text>
+<rect x="50.0000000" y="386.9483588" width="264.0000000" height="104.7619048" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 6; edge 2-4</title></rect>
+<text x="182.0000000" y="439.3293112" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">6</text>
+<rect x="314.0000000" y="211.0060332" width="98.5277023" height="280.7042304" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 7; edge 3-4</title></rect>
+<text x="363.2638512" y="351.3581484" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">7</text>
+<rect x="50" y="128" width="440" height="440" fill="none" stroke="#000000" stroke-width="2"/>
+<text x="550" y="79" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="700" fill="#000000">Solution 2</text>
+<text x="550" y="101" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#333333">Algebraic degree 1</text>
+<text x="550" y="120" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#333333">Congruency 7=2+2+2+1</text>
+<rect x="550.0000000" y="128.0000000" width="314.2857143" height="88.0000000" fill="#268bd2" stroke="#000000" stroke-width="1.5"><title>Rectangle 1; edge 0-2</title></rect>
+<text x="707.1428571" y="172.0000000" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#ffffff">1</text>
+<rect x="864.2857143" y="128.0000000" width="125.7142857" height="220.0000000" fill="#dc322f" stroke="#000000" stroke-width="1.5"><title>Rectangle 2; edge 0-3</title></rect>
+<text x="927.1428571" y="238.0000000" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#ffffff">2</text>
+<rect x="864.2857143" y="348.0000000" width="125.7142857" height="220.0000000" fill="#dc322f" stroke="#000000" stroke-width="1.5"><title>Rectangle 3; edge 1-3</title></rect>
+<text x="927.1428571" y="458.0000000" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#ffffff">3</text>
+<rect x="550.0000000" y="480.0000000" width="314.2857143" height="88.0000000" fill="#268bd2" stroke="#000000" stroke-width="1.5"><title>Rectangle 4; edge 1-4</title></rect>
+<text x="707.1428571" y="524.0000000" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#ffffff">4</text>
+<rect x="654.7619048" y="216.0000000" width="209.5238095" height="132.0000000" fill="#859900" stroke="#000000" stroke-width="1.5"><title>Rectangle 5; edge 2-3</title></rect>
+<text x="759.5238095" y="282.0000000" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">5</text>
+<rect x="550.0000000" y="216.0000000" width="104.7619048" height="264.0000000" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 6; edge 2-4</title></rect>
+<text x="602.3809524" y="348.0000000" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">6</text>
+<rect x="654.7619048" y="348.0000000" width="209.5238095" height="132.0000000" fill="#859900" stroke="#000000" stroke-width="1.5"><title>Rectangle 7; edge 3-4</title></rect>
+<text x="759.5238095" y="414.0000000" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">7</text>
+<rect x="550" y="128" width="440" height="440" fill="none" stroke="#000000" stroke-width="2"/>
+<text x="50" y="619" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="700" fill="#000000">Solution 3</text>
+<text x="50" y="641" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#333333">Algebraic degree 2</text>
+<text x="50" y="660" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#333333">Congruency 7=1+...</text>
+<rect x="50.0000000" y="668.0000000" width="362.5277023" height="76.2897364" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 1; edge 0-2</title></rect>
+<text x="231.2638512" y="706.1448682" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">1</text>
+<rect x="412.5277023" y="668.0000000" width="77.4722977" height="356.9939668" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 2; edge 0-3</title></rect>
+<text x="451.2638512" y="846.4969834" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">2</text>
+<rect x="156.8056310" y="1024.9939668" width="333.1943690" height="83.0060332" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 3; edge 1-3</title></rect>
+<text x="323.4028155" y="1066.4969834" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">3</text>
+<rect x="50.0000000" y="849.0516412" width="106.8056310" height="258.9483588" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 4; edge 1-4</title></rect>
+<text x="103.4028155" y="978.5258206" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">4</text>
+<rect x="314.0000000" y="744.2897364" width="98.5277023" height="280.7042304" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 5; edge 2-3</title></rect>
+<text x="363.2638512" y="884.6418516" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">5</text>
+<rect x="50.0000000" y="744.2897364" width="264.0000000" height="104.7619048" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 6; edge 2-4</title></rect>
+<text x="182.0000000" y="796.6706888" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">6</text>
+<rect x="156.8056310" y="849.0516412" width="157.1943690" height="175.9423256" fill="#fdf6e3" stroke="#000000" stroke-width="1.5"><title>Rectangle 7; edge 3-4</title></rect>
+<text x="235.4028155" y="937.0228040" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, sans-serif" font-weight="700" font-size="24.00" fill="#000000">7</text>
+<rect x="50" y="668" width="440" height="440" fill="none" stroke="#000000" stroke-width="2"/>
+</svg>
